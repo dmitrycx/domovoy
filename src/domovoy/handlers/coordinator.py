@@ -10,30 +10,18 @@ from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 from domovoy.db import Database
-from domovoy.handlers.common import get_config, get_db
+from domovoy.handlers.common import get_db, require_coordinator
 from domovoy.handlers.requests import vote_keyboard
 from domovoy.models import Request, Status
 from domovoy.render import STATUS_LABELS, render_card
 
 logger = logging.getLogger(__name__)
 
-NOT_COORDINATOR = (
-    "⛔ Coordinators only. / Только для координаторов.\n"
-    "Use /whoami to get your ID. / Используйте /whoami, чтобы узнать свой ID."
-)
 STATUS_USAGE = "Usage / Использование: /status <id> <open|progress|done|wontfix>"
 ASSIGN_USAGE = "Usage / Использование: /assign <id> <name or @user>"
 DELETE_USAGE = "Usage / Использование: /delete <id>"
 NOT_FOUND = "Request #{id} not found / Заявка #{id} не найдена"
 DELETED_CARD = "🗑 Request #{id} removed by a coordinator. / Заявка #{id} удалена координатором."
-
-
-def _is_coordinator(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    return get_config(context).is_coordinator(update.effective_user.id)
-
-
-async def _reject_non_coordinator(update: Update) -> None:
-    await update.effective_message.reply_text(NOT_COORDINATOR)
 
 
 async def update_card(
@@ -90,8 +78,7 @@ async def _fetch_request(
 
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not _is_coordinator(update, context):
-        await _reject_non_coordinator(update)
+    if not await require_coordinator(update, context):
         return
     args = context.args or []
     if len(args) != 2 or not args[0].isdigit():
@@ -118,8 +105,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def assign_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not _is_coordinator(update, context):
-        await _reject_non_coordinator(update)
+    if not await require_coordinator(update, context):
         return
     args = context.args or []
     if len(args) < 2 or not args[0].isdigit():
@@ -141,8 +127,7 @@ async def assign_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def delete_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not _is_coordinator(update, context):
-        await _reject_non_coordinator(update)
+    if not await require_coordinator(update, context):
         return
     args = context.args or []
     if len(args) != 1 or not args[0].isdigit():
