@@ -1,0 +1,28 @@
+# Fly.io config — Domovoy runs as an always-on worker (long polling, no HTTP).
+# First deploy:
+#   fly launch --no-deploy          # creates the app, keep this file
+#   fly volumes create domovoy_data --size 1
+#   fly secrets set BOT_TOKEN=... COORDINATOR_IDS=...
+#   fly deploy
+
+app = "domovoy-hoa"
+primary_region = "waw"
+
+[build]
+
+[env]
+  DB_PATH = "/data/domovoy.db"
+  DIGEST_TIME = "09:00"
+  TZ = "Europe/Belgrade"
+
+[mounts]
+  source = "domovoy_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+
+# Single instance only: SQLite + long polling must not run in parallel.
+[deploy]
+  strategy = "immediate"

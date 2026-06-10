@@ -28,12 +28,47 @@ _"5 open · oldest 94 days, no owner."_
 
 ## Status
 
-🚧 **Spec phase.** Design is finalized — see **[SPEC.md](./SPEC.md)**. Implementation next.
+✅ **Implemented.** Design in **[SPEC.md](./SPEC.md)**, implementation decisions in
+[docs/IMPLEMENTATION.md](./docs/IMPLEMENTATION.md).
 
-## Tech (planned)
+## Quick start (local)
 
-Python · [`python-telegram-bot`](https://docs.python-telegram-bot.org/) v21 · SQLite ·
-long-polling · free cloud hosting (Fly.io / Railway / Render).
+Requires [uv](https://docs.astral.sh/uv/) (it fetches Python 3.12 automatically).
+
+```bash
+uv sync                      # install deps into .venv
+cp .env.example .env         # fill in BOT_TOKEN (from @BotFather)
+set -a && source .env && set +a
+uv run python -m domovoy     # starts long polling
+```
+
+Then add the bot to your building group, send `/whoami`, and put your ID into
+`COORDINATOR_IDS` to unlock `/status`, `/assign`, `/report`, `/digest`, `/delete`.
+
+Run the tests:
+
+```bash
+uv run pytest
+```
+
+## Deploy (Fly.io free tier)
+
+The bot is a long-polling worker — no public URL needed. SQLite lives on a 1 GB volume.
+
+```bash
+fly launch --no-deploy                 # uses the provided fly.toml + Dockerfile
+fly volumes create domovoy_data --size 1
+fly secrets set BOT_TOKEN=... COORDINATOR_IDS=...
+fly deploy
+```
+
+Config is all env vars: `BOT_TOKEN`, `COORDINATOR_IDS`, `DB_PATH`, `DIGEST_TIME`, `TZ`
+— see [.env.example](./.env.example).
+
+## Tech
+
+Python 3.12 · [`python-telegram-bot`](https://docs.python-telegram-bot.org/) v21
+(async, job-queue) · SQLite via `aiosqlite` · long polling · 163 tests (pytest).
 
 ## License
 
