@@ -38,6 +38,9 @@ def context(db, config):
     ctx.bot.username = "DomovoyBot"
     ctx.bot.send_message = AsyncMock(return_value=sent_message(900))
     ctx.bot.send_photo = AsyncMock(return_value=sent_message(901))
+    ctx.bot.edit_message_text = AsyncMock()
+    ctx.bot.edit_message_caption = AsyncMock()
+    ctx.bot.edit_message_reply_markup = AsyncMock()
     return ctx
 
 

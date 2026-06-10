@@ -37,6 +37,24 @@ src/domovoy/
   `now` for testability.
 - List lines: `#id · 👍N · <desc ≤40 chars> · <age>d · <status emoji>[ 🔴] · <owner|—>`.
 
+## Voting (`handlers/voting.py`)
+
+- The callback query is **always answered** (Telegram requires it within seconds).
+- A failed button repaint (e.g. "message is not modified" race from concurrent taps)
+  is logged and ignored — the vote itself is already persisted.
+
+## Coordinator actions (`handlers/coordinator.py`)
+
+- Permission = `user_id ∈ COORDINATOR_IDS` (config), checked per command; everyone
+  else gets a bilingual rejection pointing at `/whoami`.
+- Card re-render edits the original message in place: `edit_message_caption` for
+  photo cards, `edit_message_text` otherwise; failures are logged, never fatal.
+- Author notification is a **DM** (`send_message` to `author_id`). It is skipped when
+  the coordinator changes their own request, and silently tolerated when the author
+  never opened a private chat with the bot (Telegram forbids unsolicited DMs).
+- `/delete` soft-deletes in the DB and blanks the card to a removal notice
+  (button gone), keeping the audit row.
+
 ## Time & age
 
 - `age_days` floors to whole days and never goes negative.
