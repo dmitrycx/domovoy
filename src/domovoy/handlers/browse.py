@@ -5,7 +5,7 @@ from __future__ import annotations
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from domovoy.handlers.common import get_db
+from domovoy.handlers.common import get_db, reply_chunked
 from domovoy.handlers.requests import vote_keyboard
 from domovoy.render import render_card, render_list, render_list_line
 
@@ -22,7 +22,7 @@ async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         requests = await db.list_done(chat_id)
     else:
         requests = await db.list_open(chat_id)
-    await update.effective_message.reply_text(render_list(requests, done=done))
+    await reply_chunked(update.effective_message, render_list(requests, done=done))
 
 
 async def show_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -33,14 +33,15 @@ async def show_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     request_id = int(context.args[0])
 
     db = get_db(context)
-    request = await db.get_request(request_id)
+    chat_id = update.effective_chat.id
+    # scoped to this chat: other chats (or DMs) can't enumerate requests
+    request = await db.get_request(request_id, group_chat_id=chat_id)
     if request is None:
         await message.reply_text(NOT_FOUND.format(id=request_id))
         return
 
     card = render_card(request)
     keyboard = vote_keyboard(request.id, request.votes)
-    chat_id = update.effective_chat.id
     if request.photo_file_id:
         await context.bot.send_photo(
             chat_id=chat_id,
@@ -61,4 +62,4 @@ async def oldest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.effective_message.reply_text(render_list([]))
         return
     lines = [render_list_line(r) for r in requests]
-    await update.effective_message.reply_text("\n".join([OLDEST_HEADER, *lines]))
+    await reply_chunked(update.effective_message, "\n".join([OLDEST_HEADER, *lines]))

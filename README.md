@@ -45,6 +45,12 @@ uv run python -m domovoy     # starts long polling
 Then add the bot to your building group, send `/whoami`, and put your ID into
 `COORDINATOR_IDS` to unlock `/status`, `/assign`, `/report`, `/digest`, `/delete`.
 
+> **BotFather settings:** keep *Group Privacy* **ON** (the bot must not read ordinary
+> chat) and, once the bot is in your group, consider disabling *Allow Groups* so
+> strangers can't add it elsewhere. The weekly digest is pinned to the first group
+> the bot sees. Coordinators posting as *anonymous admins* won't be recognized —
+> Telegram hides their user ID.
+
 Run the tests:
 
 ```bash

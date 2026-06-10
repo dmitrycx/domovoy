@@ -35,3 +35,42 @@ async def require_coordinator(
         return True
     await update.effective_message.reply_text(NOT_COORDINATOR)
     return False
+
+
+TELEGRAM_MESSAGE_LIMIT = 4096
+
+
+def split_message(text: str, limit: int = TELEGRAM_MESSAGE_LIMIT) -> list[str]:
+    """Split text into Telegram-sized chunks, preferring line boundaries."""
+    if len(text) <= limit:
+        return [text]
+    chunks: list[str] = []
+    current = ""
+    for line in text.split("\n"):
+        while len(line) > limit:  # a single pathological line
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.append(line[:limit])
+            line = line[limit:]
+        candidate = f"{current}\n{line}" if current else line
+        if len(candidate) > limit:
+            chunks.append(current)
+            current = line
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+async def reply_chunked(message, text: str) -> None:
+    for chunk in split_message(text):
+        await message.reply_text(chunk)
+
+
+def sanitize_csv_cell(value: str) -> str:
+    """Neutralize spreadsheet formula injection (=, +, -, @, tab, CR prefixes)."""
+    if value and value[0] in "=+-@\t\r":
+        return "'" + value
+    return value

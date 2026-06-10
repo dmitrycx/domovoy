@@ -69,10 +69,10 @@ class TestGuidedFallback:
         assert "describe" in text.lower()
         assert "опишите" in text.lower()
         # pending registered under prompt message id, for this user
-        assert context.chat_data["pending_new"][500] == 42
+        assert context.chat_data["pending_new"][500] == (42, None)
 
     async def test_reply_to_prompt_creates_request(self, db, context):
-        context.chat_data["pending_new"] = {500: 42}
+        context.chat_data["pending_new"] = {500: (42, None)}
         prompt = make_update(message_id=500).effective_message
         update = make_update(
             text="Leaking pipe in basement", user_id=42, reply_to_message=prompt
@@ -85,7 +85,7 @@ class TestGuidedFallback:
         assert context.chat_data["pending_new"] == {}
 
     async def test_reply_with_photo_keeps_photo(self, db, context):
-        context.chat_data["pending_new"] = {500: 42}
+        context.chat_data["pending_new"] = {500: (42, None)}
         prompt = make_update(message_id=500).effective_message
         update = make_update(
             caption="Leaking pipe",
@@ -98,12 +98,12 @@ class TestGuidedFallback:
         assert req.photo_file_id == "ph-9"
 
     async def test_reply_from_other_user_is_ignored(self, db, context):
-        context.chat_data["pending_new"] = {500: 42}
+        context.chat_data["pending_new"] = {500: (42, None)}
         prompt = make_update(message_id=500).effective_message
         update = make_update(text="hijack", user_id=777, reply_to_message=prompt)
         await guided_reply(update, context)
         assert await db.list_open(GROUP_ID) == []
-        assert context.chat_data["pending_new"] == {500: 42}
+        assert context.chat_data["pending_new"] == {500: (42, None)}
 
     async def test_reply_to_unrelated_message_is_ignored(self, db, context):
         context.chat_data["pending_new"] = {}
@@ -113,7 +113,7 @@ class TestGuidedFallback:
         assert await db.list_open(GROUP_ID) == []
 
     async def test_empty_reply_asks_again(self, db, context):
-        context.chat_data["pending_new"] = {500: 42}
+        context.chat_data["pending_new"] = {500: (42, None)}
         prompt = make_update(message_id=500).effective_message
         update = make_update(text="   ", user_id=42, reply_to_message=prompt)
         await guided_reply(update, context)

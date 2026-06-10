@@ -8,9 +8,14 @@ import io
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from domovoy.handlers.common import get_db, require_coordinator
+from domovoy.handlers.common import (
+    get_db,
+    reply_chunked,
+    require_coordinator,
+    sanitize_csv_cell,
+)
 from domovoy.models import Request
-from domovoy.render import STATUS_LABELS, age_days, utcnow
+from domovoy.render import STATUS_LABELS, age_days, truncate, utcnow
 
 EMPTY_REPORT = "No open requests. 🎉 / Нет открытых заявок. 🎉"
 
@@ -22,7 +27,7 @@ def build_text_report(requests: list[Request]) -> str:
     header = f"📄 Open requests for HOA / Открытые заявки для УК — {now.date().isoformat()}"
     lines = [header, ""]
     for r in requests:
-        lines.append(f"#{r.id} · {r.description}")
+        lines.append(f"#{r.id} · {truncate(r.description, 200)}")
         lines.append(
             f"   👍 {r.votes} · {age_days(r.created_at, now)} days/дн. · "
             f"{STATUS_LABELS[r.status]} · 👤 {r.owner or '—'}"
@@ -40,11 +45,11 @@ def build_csv_report(requests: list[Request]) -> bytes:
         writer.writerow(
             [
                 r.id,
-                r.description,
+                sanitize_csv_cell(r.description),
                 r.votes,
                 age_days(r.created_at, now),
                 r.status.value,
-                r.owner or "",
+                sanitize_csv_cell(r.owner or ""),
                 r.created_at,
             ]
         )
@@ -71,4 +76,4 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not requests:
         await update.effective_message.reply_text(EMPTY_REPORT)
         return
-    await update.effective_message.reply_text(build_text_report(requests))
+    await reply_chunked(update.effective_message, build_text_report(requests))

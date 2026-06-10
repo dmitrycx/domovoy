@@ -76,6 +76,33 @@ src/domovoy/
   config through `bot_data`. The DB directory is created on startup.
 - Long polling with `allowed_updates=Update.ALL_TYPES`.
 
+## Hardening (from code & security review)
+
+- **Chat scoping:** `/show`, vote callbacks, and all coordinator commands fetch
+  requests scoped to the chat they were invoked from (`get_request(id, group_chat_id)`),
+  so request data can't be enumerated from DMs or another group.
+- **Telegram limits:** descriptions are capped at 800 chars at intake (photo captions
+  cap at 1024 incl. ~150 chars of card chrome); `/list`, `/report`, `/digest` output is
+  chunked at 4096; the digest lists at most 10 stale lines (+ "and N more"); the text
+  report truncates descriptions at 200 chars (CSV keeps them full).
+- **Edited messages don't act:** all command/message handlers filter on
+  `UpdateType.MESSAGE`, so editing `/new ...` doesn't file a duplicate.
+- **Digest target pinned:** first group wins; adding the bot to another group logs a
+  warning instead of re-targeting the digest. Migrate by editing the
+  `group_chat_id` settings row.
+- **CSV cells** starting with `=`, `+`, `-`, `@`, tab, or CR get an apostrophe prefix
+  (spreadsheet formula-injection guard).
+- **Token hygiene:** `httpx`/`httpcore` loggers are capped at WARNING — at INFO httpx
+  logs every Bot API URL, which contains the token.
+- **Failed card posts roll back** the just-created request and tell the user, instead
+  of keeping an invisible row.
+- **Guided flow:** a photo sent with a bare `/new` caption is stashed in the pending
+  entry and attached when the text-only reply arrives; one pending prompt per user.
+- **Votes are purged** when a request is soft-deleted (data minimization).
+- **Deviation from SPEC §6:** `/oldest` is intentionally open to all residents (the
+  spec table lists it under coordinators); there's nothing sensitive in it and it
+  supports the accountability goal.
+
 ## Time & age
 
 - `age_days` floors to whole days and never goes negative.
