@@ -29,10 +29,18 @@ async def vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             answered = True
             return
 
+        if update.effective_chat is None:
+            # no chat to scope to (e.g. inline mode) — refuse rather than
+            # fall back to an unscoped fetch
+            await query.answer(ANSWER_NOT_FOUND)
+            answered = True
+            return
+
         db = get_db(context)
         # scope to the chat the button lives in — no cross-chat voting
-        chat_id = update.effective_chat.id if update.effective_chat else None
-        request = await db.get_request(request_id, group_chat_id=chat_id)
+        request = await db.get_request(
+            request_id, group_chat_id=update.effective_chat.id
+        )
         if request is None:
             await query.answer(ANSWER_NOT_FOUND)
             answered = True

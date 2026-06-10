@@ -13,12 +13,20 @@ from domovoy.db import Database
 from domovoy.handlers.common import get_db, require_coordinator
 from domovoy.handlers.requests import vote_keyboard
 from domovoy.models import Request, Status
-from domovoy.render import STATUS_LABELS, render_card, truncate
+from domovoy.render import STATUS_LABELS, clip_utf16, render_card, truncate, utf16_len
 
 logger = logging.getLogger(__name__)
 
+# photo captions cap at 1024 UTF-16 units; owner appears in the card chrome
+MAX_OWNER = 64
+CAPTION_LIMIT = 1024
+
 STATUS_USAGE = "Usage / Использование: /status <id> <open|progress|done|wontfix>"
 ASSIGN_USAGE = "Usage / Использование: /assign <id> <name or @user>"
+OWNER_TOO_LONG = (
+    f"⚠️ Owner name is too long (max {MAX_OWNER} characters).\n"
+    f"⚠️ Имя ответственного слишком длинное (максимум {MAX_OWNER} символов)."
+)
 DELETE_USAGE = "Usage / Использование: /delete <id>"
 NOT_FOUND = "Request #{id} not found / Заявка #{id} не найдена"
 DELETED_CARD = "🗑 Request #{id} removed by a coordinator. / Заявка #{id} удалена координатором."
@@ -37,7 +45,7 @@ async def update_card(
             await context.bot.edit_message_caption(
                 chat_id=request.card_chat_id,
                 message_id=request.card_msg_id,
-                caption=card,
+                caption=clip_utf16(card, CAPTION_LIMIT),
                 reply_markup=keyboard,
             )
         else:
@@ -119,6 +127,9 @@ async def assign_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     owner = " ".join(args[1:])
+    if utf16_len(owner) > MAX_OWNER:
+        await update.effective_message.reply_text(OWNER_TOO_LONG)
+        return
     await db.set_owner(request_id, owner)
     request = await db.get_request(request_id)
     await update_card(context, request)

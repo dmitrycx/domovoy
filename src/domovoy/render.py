@@ -47,6 +47,23 @@ def truncate(text: str, limit: int = 40) -> str:
     return text[: limit - 1] + "…"
 
 
+def utf16_len(text: str) -> int:
+    """Length as Telegram counts it: UTF-16 code units (astral chars count as 2)."""
+    return sum(2 if ord(ch) > 0xFFFF else 1 for ch in text)
+
+
+def clip_utf16(text: str, limit: int) -> str:
+    """Hard-clip text to a UTF-16 budget without splitting surrogate pairs."""
+    if utf16_len(text) <= limit:
+        return text
+    units = 0
+    for index, ch in enumerate(text):
+        units += 2 if ord(ch) > 0xFFFF else 1
+        if units > limit - 1:  # leave room for the ellipsis
+            return text[:index] + "…"
+    return text
+
+
 def vote_button_text(count: int) -> str:
     return f"👍 {count}"
 
@@ -58,11 +75,14 @@ def render_card(request: Request, now: datetime | None = None) -> str:
     status_line = f"#{request.id} · {STATUS_LABELS[request.status]}"
     if is_stale(request, now):
         status_line += f" · {STALE_FLAG}"
+    # names are unbounded user input — keep the card chrome predictable
+    author = truncate(request.author_name, 64)
+    owner = truncate(request.owner, 64) if request.owner else "—"
     return (
         f"{status_line}\n"
         f"{request.description}\n"
-        f"👤 {request.author_name} · 🗓 {created_date} ({days} days ago / дн. назад)\n"
-        f"👤 Owner / Ответственный: {request.owner or '—'}"
+        f"👤 {author} · 🗓 {created_date} ({days} days ago / дн. назад)\n"
+        f"👤 Owner / Ответственный: {owner}"
     )
 
 
