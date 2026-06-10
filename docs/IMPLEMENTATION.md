@@ -81,10 +81,13 @@ src/domovoy/
 - **Chat scoping:** `/show`, vote callbacks, and all coordinator commands fetch
   requests scoped to the chat they were invoked from (`get_request(id, group_chat_id)`),
   so request data can't be enumerated from DMs or another group.
-- **Telegram limits:** descriptions are capped at 800 chars at intake (photo captions
-  cap at 1024 incl. ~150 chars of card chrome); `/list`, `/report`, `/digest` output is
-  chunked at 4096; the digest lists at most 10 stale lines (+ "and N more"); the text
-  report truncates descriptions at 200 chars (CSV keeps them full).
+- **Telegram limits (counted in UTF-16 units, as Telegram does):** descriptions are
+  capped at 700 units at intake, `/assign` owners at 64; the card truncates author and
+  owner names at 64 chars; photo captions are hard-clipped to 1024 units
+  (`clip_utf16`, never splitting a surrogate pair) as the final guarantee.
+  `/list`, `/report`, `/digest` output is chunked at 4096; the digest lists at most
+  10 stale lines (+ "and N more"); the text report truncates descriptions at
+  200 chars (CSV keeps them full).
 - **Edited messages don't act:** all command/message handlers filter on
   `UpdateType.MESSAGE`, so editing `/new ...` doesn't file a duplicate.
 - **Digest target pinned:** first group wins; adding the bot to another group logs a

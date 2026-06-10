@@ -76,13 +76,19 @@ async def track_group_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.exception("unhandled error processing update", exc_info=context.error)
-    if isinstance(update, Update) and update.effective_message:
-        try:
-            await update.effective_message.reply_text(
-                "⚠️ Something went wrong, please try again. / Что-то пошло не так, попробуйте ещё раз."
-            )
-        except Exception:  # noqa: BLE001 — never raise from the error handler
-            pass
+    if not isinstance(update, Update):
+        return
+    error_text = (
+        "⚠️ Something went wrong, please try again. / Что-то пошло не так, попробуйте ещё раз."
+    )
+    try:
+        if update.callback_query is not None:
+            # answer only the tapping user — a reply would be a public group message
+            await update.callback_query.answer(error_text[:200])
+        elif update.effective_message:
+            await update.effective_message.reply_text(error_text)
+    except Exception:  # noqa: BLE001 — never raise from the error handler
+        pass
 
 
 def build_application(config: Config) -> Application:

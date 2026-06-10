@@ -10,13 +10,15 @@ from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 from domovoy.handlers.common import get_db, largest_photo_id
-from domovoy.render import render_card, vote_button_text
+from domovoy.render import clip_utf16, render_card, utf16_len, vote_button_text
 
 logger = logging.getLogger(__name__)
 
-# Telegram photo captions cap at 1024 chars; the card adds ~150 chars of chrome,
-# so this keeps every card (text or photo) well within limits.
-MAX_DESCRIPTION = 800
+# Telegram caps photo captions at 1024 UTF-16 units and the card adds chrome
+# (status, author ≤64, owner ≤64 lines). 700 keeps normal cards comfortably
+# inside; clip_utf16 below is the hard guarantee for pathological cases.
+MAX_DESCRIPTION = 700
+CAPTION_LIMIT = 1024
 
 PROMPT_TEXT = (
     "📝 Please describe the problem (you can attach a photo) — reply to this message.\n"
@@ -118,7 +120,7 @@ async def _create_request(
     description: str,
     photo_id: str | None,
 ) -> None:
-    if len(description) > MAX_DESCRIPTION:
+    if utf16_len(description) > MAX_DESCRIPTION:
         await update.effective_message.reply_text(TOO_LONG_TEXT)
         return
 
@@ -139,7 +141,10 @@ async def _create_request(
     try:
         if photo_id:
             sent = await context.bot.send_photo(
-                chat_id=chat_id, photo=photo_id, caption=card, reply_markup=keyboard
+                chat_id=chat_id,
+                photo=photo_id,
+                caption=clip_utf16(card, CAPTION_LIMIT),
+                reply_markup=keyboard,
             )
         else:
             sent = await context.bot.send_message(
