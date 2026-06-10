@@ -55,6 +55,27 @@ src/domovoy/
 - `/delete` soft-deletes in the DB and blanks the card to a removal notice
   (button gone), keeping the audit row.
 
+## Digest & report (`digest.py`, `handlers/report.py`)
+
+- The scheduled digest needs a destination: the bot **passively records the group
+  chat id** (a `TypeHandler` in group −1 stores it in `settings.group_chat_id` on the
+  first group update, cached in `bot_data` after that). Until any group activity
+  happens, the scheduled digest silently skips.
+- Schedule: PTB `run_daily` with `days=(1,)` — PTB numbers days **0=Sunday**, so 1 is
+  Monday — at `DIGEST_TIME` local to `TZ`.
+- `/report` posts a text report; `/report csv` sends a CSV document
+  (`id,description,votes,age_days,status,owner,created_at`).
+
+## Wiring (`bot.py`)
+
+- `/new` as a **photo caption** doesn't trigger `CommandHandler` (it only matches
+  message text), so a `MessageHandler(PHOTO & CaptionRegex(^/new))` is registered too.
+- Guided replies: `MessageHandler(REPLY & ~COMMAND & (TEXT | PHOTO))` — the handler
+  itself filters down to replies to known prompts.
+- DB connect/close hang off `post_init`/`post_shutdown`; handlers reach the DB and
+  config through `bot_data`. The DB directory is created on startup.
+- Long polling with `allowed_updates=Update.ALL_TYPES`.
+
 ## Time & age
 
 - `age_days` floors to whole days and never goes negative.
