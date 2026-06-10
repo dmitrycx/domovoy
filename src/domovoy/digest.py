@@ -7,13 +7,19 @@ from datetime import datetime
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from domovoy.handlers.common import get_db, require_coordinator
+from domovoy.handlers.common import (
+    get_db,
+    reply_chunked,
+    require_coordinator,
+    split_message,
+)
 from domovoy.models import Request
 from domovoy.render import is_stale, render_list_line, truncate, utcnow
 
 EMPTY_DIGEST = "📋 No open requests. 🎉 / Нет открытых заявок. 🎉"
 STALE_HEADER = "🔴 No update in 7+ days / Без обновлений 7+ дней:"
 FOOTER = "➕ New request / Новая заявка: /new <text> · All / Все: /list"
+MAX_STALE_LINES = 10
 
 
 def build_digest(requests: list[Request], now: datetime | None = None) -> str:
@@ -39,7 +45,10 @@ def build_digest(requests: list[Request], now: datetime | None = None) -> str:
     stale = [r for r in requests if is_stale(r, now)]
     if stale:
         lines += ["", STALE_HEADER]
-        lines += [render_list_line(r, now) for r in stale]
+        lines += [render_list_line(r, now) for r in stale[:MAX_STALE_LINES]]
+        if len(stale) > MAX_STALE_LINES:
+            more = len(stale) - MAX_STALE_LINES
+            lines.append(f"… and {more} more / и ещё {more}")
 
     lines += ["", FOOTER]
     return "\n".join(lines)
@@ -53,7 +62,8 @@ async def digest_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         return  # group unknown until the first command arrives from it
     chat_id = int(raw_chat_id)
     requests = await db.list_open(chat_id)
-    await context.bot.send_message(chat_id=chat_id, text=build_digest(requests))
+    for chunk in split_message(build_digest(requests)):
+        await context.bot.send_message(chat_id=chat_id, text=chunk)
 
 
 async def digest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -61,4 +71,4 @@ async def digest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     db = get_db(context)
     requests = await db.list_open(update.effective_chat.id)
-    await update.effective_message.reply_text(build_digest(requests))
+    await reply_chunked(update.effective_message, build_digest(requests))

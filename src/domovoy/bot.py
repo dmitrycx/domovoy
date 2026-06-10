@@ -48,14 +48,41 @@ def digest_schedule(config: Config) -> tuple[dtime, tuple[int, ...]]:
 
 
 async def track_group_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Remember the group chat so the scheduled digest knows where to post."""
+    """Remember the group chat so the scheduled digest knows where to post.
+
+    First group wins: once set, the digest target is never overwritten, so adding
+    the bot to a second group cannot hijack the weekly digest (change the
+    `group_chat_id` row in the settings table to migrate deliberately).
+    """
     chat = update.effective_chat
     if chat is None or chat.type not in ("group", "supergroup"):
         return
-    if context.bot_data.get("group_chat_id") == chat.id:
+    if context.bot_data.get("group_chat_id") is not None:
         return
-    context.bot_data["group_chat_id"] = chat.id
-    await get_db(context).set_setting("group_chat_id", str(chat.id))
+    db = get_db(context)
+    stored = await db.get_setting("group_chat_id")
+    if stored is None:
+        await db.set_setting("group_chat_id", str(chat.id))
+        stored = str(chat.id)
+        logger.info("digest target group set to %s", chat.id)
+    elif stored != str(chat.id):
+        logger.warning(
+            "update from group %s ignored as digest target; pinned to %s",
+            chat.id,
+            stored,
+        )
+    context.bot_data["group_chat_id"] = int(stored)
+
+
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.exception("unhandled error processing update", exc_info=context.error)
+    if isinstance(update, Update) and update.effective_message:
+        try:
+            await update.effective_message.reply_text(
+                "⚠️ Something went wrong, please try again. / Что-то пошло не так, попробуйте ещё раз."
+            )
+        except Exception:  # noqa: BLE001 — never raise from the error handler
+            pass
 
 
 def build_application(config: Config) -> Application:
@@ -82,29 +109,40 @@ def build_application(config: Config) -> Application:
     # group -1 runs before command handlers: passive group-chat tracking
     app.add_handler(TypeHandler(Update, track_group_chat), group=-1)
 
-    app.add_handler(CommandHandler("start", help_command))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("whoami", whoami_command))
-    app.add_handler(CommandHandler("new", new_command))
-    app.add_handler(CommandHandler("list", list_command))
-    app.add_handler(CommandHandler("show", show_command))
-    app.add_handler(CommandHandler("oldest", oldest_command))
-    app.add_handler(CommandHandler("status", status_command))
-    app.add_handler(CommandHandler("assign", assign_command))
-    app.add_handler(CommandHandler("delete", delete_command))
-    app.add_handler(CommandHandler("report", report_command))
-    app.add_handler(CommandHandler("digest", digest_command))
+    # only fresh messages — otherwise editing a command re-executes it
+    # (e.g. fixing a typo in `/new ...` would file a duplicate request)
+    fresh = filters.UpdateType.MESSAGE
+
+    commands = {
+        "start": help_command,
+        "help": help_command,
+        "whoami": whoami_command,
+        "new": new_command,
+        "list": list_command,
+        "show": show_command,
+        "oldest": oldest_command,
+        "status": status_command,
+        "assign": assign_command,
+        "delete": delete_command,
+        "report": report_command,
+        "digest": digest_command,
+    }
+    for name, callback in commands.items():
+        app.add_handler(CommandHandler(name, callback, filters=fresh))
 
     app.add_handler(
-        MessageHandler(filters.PHOTO & filters.CaptionRegex(NEW_CAPTION_RE), new_command)
+        MessageHandler(
+            fresh & filters.PHOTO & filters.CaptionRegex(NEW_CAPTION_RE), new_command
+        )
     )
     app.add_handler(
         MessageHandler(
-            filters.REPLY & ~filters.COMMAND & (filters.TEXT | filters.PHOTO),
+            fresh & filters.REPLY & ~filters.COMMAND & (filters.TEXT | filters.PHOTO),
             guided_reply,
         )
     )
     app.add_handler(CallbackQueryHandler(vote_callback, pattern=r"^vote:\d+$"))
+    app.add_error_handler(on_error)
 
     when, days = digest_schedule(config)
     app.job_queue.run_daily(digest_job, time=when, days=days, name="weekly_digest")
@@ -116,6 +154,10 @@ def main() -> None:
     logging.basicConfig(
         format="%(asctime)s %(name)s %(levelname)s: %(message)s", level=logging.INFO
     )
+    # httpx logs every request URL at INFO — for the Bot API that URL contains
+    # the bot token, which must never reach the logs
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     config = Config.from_env(dict(os.environ))
     app = build_application(config)
     logger.info("starting long polling")

@@ -7,7 +7,7 @@ from domovoy.handlers.voting import vote_callback
 from tests.conftest import GROUP_ID, make_update
 
 
-def make_callback_update(data: str, user_id: int = 42):
+def make_callback_update(data: str, user_id: int = 42, chat_id: int = GROUP_ID):
     update = MagicMock()
     query = MagicMock()
     query.data = data
@@ -16,6 +16,7 @@ def make_callback_update(data: str, user_id: int = 42):
     query.edit_message_reply_markup = AsyncMock()
     update.callback_query = query
     update.effective_user = query.from_user
+    update.effective_chat = SimpleNamespace(id=chat_id, type="supergroup")
     return update
 
 

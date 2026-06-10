@@ -117,10 +117,16 @@ class Database:
         assert request is not None
         return request
 
-    async def get_request(self, request_id: int) -> Request | None:
-        cursor = await self.conn.execute(
-            _SELECT + "WHERE r.id = ? AND r.deleted = 0", (request_id,)
-        )
+    async def get_request(
+        self, request_id: int, group_chat_id: int | None = None
+    ) -> Request | None:
+        """Fetch a request; with group_chat_id, only if it belongs to that chat."""
+        query = _SELECT + "WHERE r.id = ? AND r.deleted = 0"
+        params: tuple = (request_id,)
+        if group_chat_id is not None:
+            query += " AND r.group_chat_id = ?"
+            params += (group_chat_id,)
+        cursor = await self.conn.execute(query, params)
         row = await cursor.fetchone()
         return _row_to_request(row) if row else None
 
@@ -153,6 +159,10 @@ class Database:
         await self.conn.execute(
             "UPDATE requests SET deleted = 1, updated_at = ? WHERE id = ?",
             (utcnow(), request_id),
+        )
+        # data minimization: voter IDs serve no purpose once the request is gone
+        await self.conn.execute(
+            "DELETE FROM votes WHERE request_id = ?", (request_id,)
         )
         await self.conn.commit()
 

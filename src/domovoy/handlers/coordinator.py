@@ -13,7 +13,7 @@ from domovoy.db import Database
 from domovoy.handlers.common import get_db, require_coordinator
 from domovoy.handlers.requests import vote_keyboard
 from domovoy.models import Request, Status
-from domovoy.render import STATUS_LABELS, render_card
+from domovoy.render import STATUS_LABELS, render_card, truncate
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ async def _notify_author(
     if request.author_id == changed_by:
         return
     text = (
-        f"🔔 Your request #{request.id} «{request.description}» is now: "
+        f"🔔 Your request #{request.id} «{truncate(request.description, 100)}» is now: "
         f"{STATUS_LABELS[request.status]}\n"
         f"🔔 Статус вашей заявки #{request.id} изменён."
     )
@@ -71,7 +71,8 @@ async def _notify_author(
 async def _fetch_request(
     db: Database, update: Update, request_id: int
 ) -> Request | None:
-    request = await db.get_request(request_id)
+    """Chat-scoped fetch: coordinators act only on their own group's requests."""
+    request = await db.get_request(request_id, group_chat_id=update.effective_chat.id)
     if request is None:
         await update.effective_message.reply_text(NOT_FOUND.format(id=request_id))
     return request
@@ -96,7 +97,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     await db.set_status(request_id, status)
-    request = await db.get_request(request_id)
+    request = await db.get_request(request_id)  # unscoped: re-read after update
     await update_card(context, request)
     await update.effective_message.reply_text(
         f"✅ #{request.id} → {STATUS_LABELS[status]}"
