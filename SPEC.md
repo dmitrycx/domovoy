@@ -113,6 +113,7 @@ Broken light at the main gate / Сломан фонарь у главных во
 | `/list` | Open requests by votes |
 | `/list done` | Resolved requests |
 | `/show <id>` | Full detail of one request |
+| `/oldest` | Longest-unanswered open requests |
 | `/help` | How to use the bot |
 | `/whoami` | Show your Telegram ID (to be added as coordinator) |
 
@@ -122,7 +123,6 @@ Broken light at the main gate / Сломан фонарь у главных во
 | `/status <id> <state>` | Change status |
 | `/assign <id> <owner>` | Set accountable owner |
 | `/report` | Formatted report for HOA (+ optional CSV) |
-| `/oldest` | Longest-unanswered open requests |
 | `/digest` | Trigger the digest manually |
 | `/delete <id>` | Remove spam/duplicate (soft delete) |
 

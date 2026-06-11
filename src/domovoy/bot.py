@@ -74,6 +74,28 @@ async def track_group_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     context.bot_data["group_chat_id"] = int(stored)
 
 
+async def on_chat_migrated(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Follow Telegram's group→supergroup migration, which changes the chat id.
+
+    Without this, the digest would post to the dead old chat forever and every
+    stored request would become unreachable (all lookups are chat-scoped).
+    """
+    message = update.effective_message
+    if message.migrate_to_chat_id:
+        old_id, new_id = update.effective_chat.id, message.migrate_to_chat_id
+    elif message.migrate_from_chat_id:
+        old_id, new_id = message.migrate_from_chat_id, update.effective_chat.id
+    else:
+        return
+    db = get_db(context)
+    await db.migrate_chat(old_id, new_id)
+    if await db.get_setting("group_chat_id") == str(old_id):
+        await db.set_setting("group_chat_id", str(new_id))
+    if context.bot_data.get("group_chat_id") == old_id:
+        context.bot_data["group_chat_id"] = new_id
+    logger.info("chat %s migrated to supergroup %s", old_id, new_id)
+
+
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.exception("unhandled error processing update", exc_info=context.error)
     if not isinstance(update, Update):
@@ -147,6 +169,7 @@ def build_application(config: Config) -> Application:
             guided_reply,
         )
     )
+    app.add_handler(MessageHandler(filters.StatusUpdate.MIGRATE, on_chat_migrated))
     app.add_handler(CallbackQueryHandler(vote_callback, pattern=r"^vote:\d+$"))
     app.add_error_handler(on_error)
 

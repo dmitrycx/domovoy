@@ -39,7 +39,10 @@ src/domovoy/
 
 ## Voting (`handlers/voting.py`)
 
-- The callback query is **always answered** (Telegram requires it within seconds).
+- The callback query is answered exactly once on every handled path (Telegram
+  requires an answer within seconds). On an unexpected exception the handler does
+  **not** answer — a query can only be answered once, and `on_error` owns the
+  error toast; answering first would silently swallow it.
 - A failed button repaint (e.g. "message is not modified" race from concurrent taps)
   is logged and ignored — the vote itself is already persisted.
 
@@ -74,6 +77,10 @@ src/domovoy/
   itself filters down to replies to known prompts.
 - DB connect/close hang off `post_init`/`post_shutdown`; handlers reach the DB and
   config through `bot_data`. The DB directory is created on startup.
+- A `MessageHandler(StatusUpdate.MIGRATE)` follows Telegram's group→supergroup
+  migration: requests are re-homed to the new chat id and the pinned digest target
+  is updated (card message ids don't survive migration, so old card edits fail
+  and are logged — `/show` re-posts a fresh card).
 - Long polling with `allowed_updates=Update.ALL_TYPES`.
 
 ## Hardening (from code & security review)
@@ -85,13 +92,16 @@ src/domovoy/
   capped at 700 units at intake, `/assign` owners at 64; the card truncates author and
   owner names at 64 chars; photo captions are hard-clipped to 1024 units
   (`clip_utf16`, never splitting a surrogate pair) as the final guarantee.
-  `/list`, `/report`, `/digest` output is chunked at 4096; the digest lists at most
+  `/list`, `/report`, `/digest` output is chunked at 4096 UTF-16 units
+  (`split_message` counts units, not Python chars); the digest lists at most
   10 stale lines (+ "and N more"); the text report truncates descriptions at
-  200 chars (CSV keeps them full).
+  200 chars (CSV keeps them full). All card posting/editing goes through
+  `cards.send_card`/`cards.edit_card_message`, the one place that owns the clips.
 - **Edited messages don't act:** all command/message handlers filter on
   `UpdateType.MESSAGE`, so editing `/new ...` doesn't file a duplicate.
 - **Digest target pinned:** first group wins; adding the bot to another group logs a
-  warning instead of re-targeting the digest. Migrate by editing the
+  warning instead of re-targeting the digest. Group→supergroup migration is followed
+  automatically; moving to a *different* group still requires editing the
   `group_chat_id` settings row.
 - **CSV cells** starting with `=`, `+`, `-`, `@`, tab, or CR get an apostrophe prefix
   (spreadsheet formula-injection guard).
@@ -102,9 +112,24 @@ src/domovoy/
 - **Guided flow:** a photo sent with a bare `/new` caption is stashed in the pending
   entry and attached when the text-only reply arrives; one pending prompt per user.
 - **Votes are purged** when a request is soft-deleted (data minimization).
-- **Deviation from SPEC §6:** `/oldest` is intentionally open to all residents (the
-  spec table lists it under coordinators); there's nothing sensitive in it and it
-  supports the accountability goal.
+
+## Hardening — round 2 (2026-06-11 verification pass)
+
+- **`/new` is group-only:** filing from a DM is refused with a bilingual notice —
+  a DM-created request would be invisible to the group, digest, and reports.
+- **Chat migration handled** (see Wiring) — previously a group→supergroup upgrade
+  orphaned every request and killed the digest permanently.
+- **UTF-16 chunking:** `split_message` now budgets in UTF-16 units; a long `/list`
+  with emoji chrome could previously produce a chunk Telegram rejects.
+- **One card-send path:** `/show` used to send photo captions un-clipped (the only
+  path that forgot); `cards.py` now owns send/edit + clipping for all call sites.
+- **Too-long descriptions re-prompt** (ForceReply, pending entry re-armed with the
+  stashed photo) instead of dead-ending the guided flow.
+- **Request-id args use `isdecimal()`** via `parse_request_id` — `isdigit()`
+  accepted characters like `⁵` that `int()` then crashed on.
+- **Digest age** uses `render.age_days` (clamped ≥ 0) instead of an inline copy.
+- **SPEC §6 table fixed:** `/oldest` moved to the residents table, matching the
+  §5.6 prose and the implementation (previously documented here as a deviation).
 
 ## Time & age
 

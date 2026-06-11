@@ -9,17 +9,16 @@ from telegram import Update
 from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
+from domovoy.cards import edit_card_message, vote_keyboard
 from domovoy.db import Database
-from domovoy.handlers.common import get_db, require_coordinator
-from domovoy.handlers.requests import vote_keyboard
+from domovoy.handlers.common import get_db, parse_request_id, require_coordinator
 from domovoy.models import Request, Status
-from domovoy.render import STATUS_LABELS, clip_utf16, render_card, truncate, utf16_len
+from domovoy.render import STATUS_LABELS, render_card, truncate, utf16_len
 
 logger = logging.getLogger(__name__)
 
 # photo captions cap at 1024 UTF-16 units; owner appears in the card chrome
 MAX_OWNER = 64
-CAPTION_LIMIT = 1024
 
 STATUS_USAGE = "Usage / Использование: /status <id> <open|progress|done|wontfix>"
 ASSIGN_USAGE = "Usage / Использование: /assign <id> <name or @user>"
@@ -38,23 +37,15 @@ async def update_card(
     """Re-render the posted card in place (text or photo caption)."""
     if request.card_chat_id is None or request.card_msg_id is None:
         return
-    card = render_card(request)
-    keyboard = vote_keyboard(request.id, request.votes)
     try:
-        if request.photo_file_id:
-            await context.bot.edit_message_caption(
-                chat_id=request.card_chat_id,
-                message_id=request.card_msg_id,
-                caption=clip_utf16(card, CAPTION_LIMIT),
-                reply_markup=keyboard,
-            )
-        else:
-            await context.bot.edit_message_text(
-                chat_id=request.card_chat_id,
-                message_id=request.card_msg_id,
-                text=card,
-                reply_markup=keyboard,
-            )
+        await edit_card_message(
+            context.bot,
+            chat_id=request.card_chat_id,
+            msg_id=request.card_msg_id,
+            text=render_card(request),
+            is_photo=bool(request.photo_file_id),
+            keyboard=vote_keyboard(request.id, request.votes),
+        )
     except TelegramError as exc:
         logger.warning("could not update card for #%s: %s", request.id, exc)
 
@@ -90,7 +81,8 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not await require_coordinator(update, context):
         return
     args = context.args or []
-    if len(args) != 2 or not args[0].isdigit():
+    request_id = parse_request_id(args)
+    if len(args) != 2 or request_id is None:
         await update.effective_message.reply_text(STATUS_USAGE)
         return
     try:
@@ -100,7 +92,6 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     db = get_db(context)
-    request_id = int(args[0])
     if await _fetch_request(db, update, request_id) is None:
         return
 
@@ -117,12 +108,12 @@ async def assign_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not await require_coordinator(update, context):
         return
     args = context.args or []
-    if len(args) < 2 or not args[0].isdigit():
+    request_id = parse_request_id(args)
+    if len(args) < 2 or request_id is None:
         await update.effective_message.reply_text(ASSIGN_USAGE)
         return
 
     db = get_db(context)
-    request_id = int(args[0])
     if await _fetch_request(db, update, request_id) is None:
         return
 
@@ -142,32 +133,26 @@ async def delete_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not await require_coordinator(update, context):
         return
     args = context.args or []
-    if len(args) != 1 or not args[0].isdigit():
+    request_id = parse_request_id(args)
+    if len(args) != 1 or request_id is None:
         await update.effective_message.reply_text(DELETE_USAGE)
         return
 
     db = get_db(context)
-    request_id = int(args[0])
     request = await _fetch_request(db, update, request_id)
     if request is None:
         return
 
     await db.soft_delete(request_id)
     if request.card_chat_id is not None and request.card_msg_id is not None:
-        notice = DELETED_CARD.format(id=request_id)
         try:
-            if request.photo_file_id:
-                await context.bot.edit_message_caption(
-                    chat_id=request.card_chat_id,
-                    message_id=request.card_msg_id,
-                    caption=notice,
-                )
-            else:
-                await context.bot.edit_message_text(
-                    chat_id=request.card_chat_id,
-                    message_id=request.card_msg_id,
-                    text=notice,
-                )
+            await edit_card_message(
+                context.bot,
+                chat_id=request.card_chat_id,
+                msg_id=request.card_msg_id,
+                text=DELETED_CARD.format(id=request_id),
+                is_photo=bool(request.photo_file_id),
+            )
         except TelegramError as exc:
             logger.warning("could not blank card for #%s: %s", request_id, exc)
     await update.effective_message.reply_text(
