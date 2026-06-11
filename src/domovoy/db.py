@@ -166,6 +166,19 @@ class Database:
         )
         await self.conn.commit()
 
+    async def migrate_chat(self, old_chat_id: int, new_chat_id: int) -> None:
+        """Re-home requests after a group→supergroup migration (new chat id).
+
+        card_chat_id is left untouched: message ids do not survive migration,
+        so pointing card edits at the new chat could hit unrelated messages —
+        a failed edit on the dead chat is caught and logged instead.
+        """
+        await self.conn.execute(
+            "UPDATE requests SET group_chat_id = ? WHERE group_chat_id = ?",
+            (new_chat_id, old_chat_id),
+        )
+        await self.conn.commit()
+
     # -- lists ------------------------------------------------------------
 
     async def list_open(self, group_chat_id: int) -> list[Request]:

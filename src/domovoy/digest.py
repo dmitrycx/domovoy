@@ -14,7 +14,7 @@ from domovoy.handlers.common import (
     split_message,
 )
 from domovoy.models import Request
-from domovoy.render import is_stale, render_list_line, truncate, utcnow
+from domovoy.render import age_days, is_stale, render_list_line, truncate, utcnow
 
 EMPTY_DIGEST = "📋 No open requests. 🎉 / Нет открытых заявок. 🎉"
 STALE_HEADER = "🔴 No update in 7+ days / Без обновлений 7+ дней:"
@@ -29,7 +29,7 @@ def build_digest(requests: list[Request], now: datetime | None = None) -> str:
 
     oldest = min(requests, key=lambda r: r.created_at)
     top = max(requests, key=lambda r: r.votes)
-    oldest_age = (now - datetime.fromisoformat(oldest.created_at)).days
+    oldest_age = age_days(oldest.created_at, now)
     oldest_desc = truncate(oldest.description, 30)
     top_desc = truncate(top.description, 30)
     owner_en = f"owner: {oldest.owner}" if oldest.owner else "no owner"

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from telegram import Update
+from telegram.constants import MessageLimit
 from telegram.ext import ContextTypes
 
 from domovoy.config import Config
 from domovoy.db import Database
+from domovoy.render import utf16_len
 
 NOT_COORDINATOR = (
     "⛔ Coordinators only. / Только для координаторов.\n"
@@ -37,28 +39,57 @@ async def require_coordinator(
     return False
 
 
-TELEGRAM_MESSAGE_LIMIT = 4096
+TELEGRAM_MESSAGE_LIMIT = int(MessageLimit.MAX_TEXT_LENGTH)
+
+
+def parse_request_id(args: list[str] | None) -> int | None:
+    """First command arg as a request id, or None.
+
+    isdecimal, not isdigit: isdigit also accepts characters like '⁵'
+    that int() rejects with ValueError.
+    """
+    if not args or not args[0].isdecimal():
+        return None
+    return int(args[0])
+
+
+def _split_at_utf16(text: str, limit: int) -> tuple[str, str]:
+    """Split text so the head fits the UTF-16 budget, never inside a char."""
+    units = 0
+    for index, ch in enumerate(text):
+        units += 2 if ord(ch) > 0xFFFF else 1
+        if units > limit:
+            return text[:index], text[index:]
+    return text, ""
 
 
 def split_message(text: str, limit: int = TELEGRAM_MESSAGE_LIMIT) -> list[str]:
-    """Split text into Telegram-sized chunks, preferring line boundaries."""
-    if len(text) <= limit:
+    """Split text into Telegram-sized chunks, preferring line boundaries.
+
+    Budgets in UTF-16 code units — Telegram's unit — so emoji-heavy text
+    (astral chars count as 2) cannot produce a chunk the API rejects.
+    """
+    if utf16_len(text) <= limit:
         return [text]
     chunks: list[str] = []
     current = ""
+    current_units = 0
     for line in text.split("\n"):
-        while len(line) > limit:  # a single pathological line
+        line_units = utf16_len(line)
+        while line_units > limit:  # a single pathological line
             if current:
                 chunks.append(current)
-                current = ""
-            chunks.append(line[:limit])
-            line = line[limit:]
-        candidate = f"{current}\n{line}" if current else line
-        if len(candidate) > limit:
+                current, current_units = "", 0
+            head, line = _split_at_utf16(line, limit)
+            chunks.append(head)
+            line_units = utf16_len(line)
+        separator = 1 if current else 0
+        if current_units + separator + line_units > limit:
             chunks.append(current)
-            current = line
+            current, current_units = line, line_units
         else:
-            current = candidate
+            current = f"{current}\n{line}" if current else line
+            current_units += separator + line_units
     if current:
         chunks.append(current)
     return chunks

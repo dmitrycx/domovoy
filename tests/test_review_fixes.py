@@ -202,9 +202,11 @@ class TestVotesCleanup:
 
 
 class TestVoteAlwaysAnswered:
-    """CR-7: callback query answered even when the DB throws."""
+    """CR-7 (revised): on a DB error the handler must NOT answer the query —
+    a callback query can only be answered once, and the error toast is owned
+    by on_error; pre-answering here would swallow it silently."""
 
-    async def test_answer_called_on_db_error(self, db, context, monkeypatch):
+    async def test_no_pre_answer_on_db_error(self, db, context, monkeypatch):
         async def boom(*a, **k):
             raise RuntimeError("db down")
 
@@ -212,7 +214,7 @@ class TestVoteAlwaysAnswered:
         update = make_callback_update("vote:1")
         with pytest.raises(RuntimeError):
             await vote_callback(update, context)
-        update.callback_query.answer.assert_awaited()
+        update.callback_query.answer.assert_not_awaited()
 
 
 class TestReportTruncation:

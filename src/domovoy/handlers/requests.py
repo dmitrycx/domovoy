@@ -5,32 +5,38 @@ from __future__ import annotations
 import logging
 import re
 
-from telegram import ForceReply, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import ForceReply, Update
 from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
+from domovoy.cards import send_card
 from domovoy.handlers.common import get_db, largest_photo_id
-from domovoy.render import clip_utf16, render_card, utf16_len, vote_button_text
+from domovoy.render import utf16_len
 
 logger = logging.getLogger(__name__)
 
 # Telegram caps photo captions at 1024 UTF-16 units and the card adds chrome
 # (status, author ≤64, owner ≤64 lines). 700 keeps normal cards comfortably
-# inside; clip_utf16 below is the hard guarantee for pathological cases.
+# inside; cards.send_card clips as the hard guarantee for pathological cases.
 MAX_DESCRIPTION = 700
-CAPTION_LIMIT = 1024
 
 PROMPT_TEXT = (
     "📝 Please describe the problem (you can attach a photo) — reply to this message.\n"
     "📝 Опишите проблему (можно приложить фото) — ответьте на это сообщение."
 )
 TOO_LONG_TEXT = (
-    f"⚠️ Description is too long (max {MAX_DESCRIPTION} characters). Please shorten it.\n"
-    f"⚠️ Описание слишком длинное (максимум {MAX_DESCRIPTION} символов). Сократите его."
+    f"⚠️ Description is too long (max {MAX_DESCRIPTION} characters). "
+    "Please send a shorter one in reply to this message.\n"
+    f"⚠️ Описание слишком длинное (максимум {MAX_DESCRIPTION} символов). "
+    "Отправьте более короткое в ответ на это сообщение."
 )
 SEND_FAILED_TEXT = (
     "⚠️ Could not post the request card, please try again.\n"
     "⚠️ Не удалось опубликовать карточку заявки, попробуйте ещё раз."
+)
+GROUP_ONLY_TEXT = (
+    "🏠 Requests can only be filed in the building group chat.\n"
+    "🏠 Заявки можно подавать только в общем чате дома."
 )
 
 _COMMAND_RE = re.compile(r"^/\w+(?:@(?P<bot>\w+))?\s*")
@@ -50,18 +56,15 @@ def command_target_bot(text: str) -> str | None:
     return match.group("bot") if match else None
 
 
-def vote_keyboard(request_id: int, count: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton(vote_button_text(count), callback_data=f"vote:{request_id}")]]
-    )
-
-
 async def _send_prompt(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, photo_id: str | None
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    photo_id: str | None,
+    text: str = PROMPT_TEXT,
 ) -> None:
     user_id = update.effective_user.id
     prompt = await update.effective_message.reply_text(
-        PROMPT_TEXT, reply_markup=ForceReply(selective=True)
+        text, reply_markup=ForceReply(selective=True)
     )
     pending = context.chat_data.setdefault(PENDING_KEY, {})
     # one pending prompt per user — drop any earlier ones
@@ -73,6 +76,11 @@ async def _send_prompt(
 async def new_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     if update.effective_user is None:
+        return
+    chat = update.effective_chat
+    if chat is None or chat.type not in ("group", "supergroup"):
+        # a DM-created request would be invisible to the group (SPEC §5.1)
+        await message.reply_text(GROUP_ONLY_TEXT)
         return
     text = message.text or message.caption or ""
     target_bot = command_target_bot(text)
@@ -121,7 +129,9 @@ async def _create_request(
     photo_id: str | None,
 ) -> None:
     if utf16_len(description) > MAX_DESCRIPTION:
-        await update.effective_message.reply_text(TOO_LONG_TEXT)
+        # re-prompt so the user's shortened reply still creates the request
+        # (and keeps the stashed photo) instead of being silently ignored
+        await _send_prompt(update, context, photo_id, text=TOO_LONG_TEXT)
         return
 
     db = get_db(context)
@@ -136,20 +146,8 @@ async def _create_request(
         photo_file_id=photo_id,
     )
 
-    card = render_card(request)
-    keyboard = vote_keyboard(request.id, 0)
     try:
-        if photo_id:
-            sent = await context.bot.send_photo(
-                chat_id=chat_id,
-                photo=photo_id,
-                caption=clip_utf16(card, CAPTION_LIMIT),
-                reply_markup=keyboard,
-            )
-        else:
-            sent = await context.bot.send_message(
-                chat_id=chat_id, text=card, reply_markup=keyboard
-            )
+        sent = await send_card(context.bot, chat_id, request)
     except TelegramError as exc:
         # Don't keep an invisible request the group never saw.
         logger.warning("card post failed for #%s: %s", request.id, exc)
