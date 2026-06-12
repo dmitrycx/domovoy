@@ -61,20 +61,38 @@ uv run pytest
 
 The bot is a long-polling worker — no public URL needed. SQLite lives on a 1 GB volume.
 
+One-time setup:
+
 ```bash
 fly launch --no-deploy                 # uses the provided fly.toml + Dockerfile
 fly volumes create domovoy_data --size 1
 fly secrets set BOT_TOKEN=... COORDINATOR_IDS=...
-fly deploy
+fly deploy                             # first deploy, by hand
 ```
 
 Config is all env vars: `BOT_TOKEN`, `COORDINATOR_IDS`, `DB_PATH`, `DIGEST_TIME`, `TZ`
 — see [.env.example](./.env.example).
 
+### CI/CD (GitHub Actions)
+
+[.github/workflows/ci.yml](./.github/workflows/ci.yml) runs tests and a Docker build
+on every push and pull request; pushes to `main` then deploy to Fly automatically.
+To enable the deploy step after the one-time setup above:
+
+```bash
+fly tokens create deploy            # scoped to this app only
+gh secret set FLY_API_TOKEN         # paste the token (or use repo Settings → Secrets)
+```
+
+Until `FLY_API_TOKEN` is set, the deploy job skips with a warning instead of failing.
+Deploys are serialized (`concurrency: fly-deploy`) — a single machine with SQLite
+must never deploy concurrently.
+
 ## Tech
 
 Python 3.12 · [`python-telegram-bot`](https://docs.python-telegram-bot.org/) v21
-(async, job-queue) · SQLite via `aiosqlite` · long polling · 163 tests (pytest).
+(async, job-queue) · SQLite via `aiosqlite` · long polling · 193 tests (pytest) ·
+GitHub Actions CI/CD.
 
 ## License
 
