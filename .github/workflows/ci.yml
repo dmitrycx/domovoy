@@ -1,0 +1,70 @@
+# Build, test, and deploy Domovoy.
+#
+# - test + docker build run on every push to main and every pull request
+# - deploy to Fly.io runs on push to main only, after both pass; it skips
+#   (with a warning) until the FLY_API_TOKEN repo secret is configured —
+#   see README "Deploy" for the one-time Fly setup
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Verify lockfile matches pyproject.toml
+        run: uv lock --check
+      - name: Install dependencies (Python 3.12 via .python-version)
+        run: uv sync --frozen
+      - name: Run tests
+        run: uv run pytest -q
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        # smoke check only — the deploy below rebuilds on Fly's remote builder
+        run: docker build --tag domovoy:ci .
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test, build]
+    runs-on: ubuntu-latest
+    # serialize deploys: single machine + SQLite must never deploy concurrently
+    concurrency:
+      group: fly-deploy
+      cancel-in-progress: false
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - name: Check deploy token
+        id: gate
+        run: |
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "::warning::FLY_API_TOKEN secret not set — skipping deploy (README: Deploy)"
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.deploy == 'true'
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+        if: steps.gate.outputs.deploy == 'true'
+      - name: Deploy to Fly.io
+        if: steps.gate.outputs.deploy == 'true'
+        run: flyctl deploy --remote-only
